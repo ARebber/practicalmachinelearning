@@ -1,0 +1,114 @@
+---
+title: "ML Project"
+author: "Anja I. Rebber"
+date: "April 17, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE, warning = FALSE)
+```
+
+## Project Description
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+However, in this project the goal was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+## Getting and Cleaning Data
+```{r}
+library(caret)
+library(randomForest)
+```
+
+The data for this study (a set for training purposes and a set for prediction on new data) were downloaded from the course site and saved into the R working directory. The training data were loaded and inspected (using the `names()` and `str()` functions, not shown here), since no codebook was available.
+```{r}
+data1 <-read.csv("pml-training.csv")
+dim(data1)
+```
+The dataset contains useless variables for prediction perposes, like the persons name. These variables are removed. Also, all data are converted to numeric values, in order to prevent data manipulation errors later on. A last concern are NAs in variables, since this would result in errors. The amount of NAs in each vaiable was checked. High amounts were found in many variables, that had to be excluded. Since it is for later prediction absolutely necessary that the same variables are retained in trainig and test set, the latter was loaded and cleanend like the training set before. Then, the removal of variables was performed.
+```{r}
+#Data Processing
+#Removing meaningless variables
+data1[,c(1:7)]=NULL
+
+#Converting all values to numeric to avoid data manipulation errors
+for(i in seq(1,152)){
+    data1[,i]=as.numeric(data1[,i])
+}
+
+#Determination of amount NA in remaing variables
+colNaData1 <- colSums(sapply(data1, is.na))
+
+#Loading test data
+dataP <-read.csv("pml-testing.csv")
+
+#Same treatment of this data
+dataP[,c(1:7)]=NULL
+for(i in seq(1,152)){
+    dataP[,i]=as.numeric(dataP[,i])
+}
+colNaDataP <- colSums(sapply(dataP, is.na))
+
+#Keeping only those variables that have no NAs in both datasets
+data1 <- data1[,colNaData1 == 0 & colNaDataP == 0]
+dataP <- dataP[,colNaData1 == 0 & colNaDataP == 0]
+```
+After these steps of data cleaning, model building can be prepared. 
+
+## Producing Training and Validation Set
+The provided training data is split into a training and a testing set. The latter will be used for model validation.
+```{r}
+set.seed(33833)
+inTrain <- createDataPartition(y=data1$classe, p=0.7, list=FALSE)
+training <- data1[inTrain,]
+testing <- data1[-inTrain,]
+dim(training) 
+dim(testing)
+```
+
+## Configuring Parallel Processing
+Parallel processing is necessary due to computational demands of random forest models. This is set up as follows:
+```{r}
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+```
+
+## Developing Training Model
+The training model is built using the `randomForest()` function from the randomForest package, since it turned out that using the rf-method in the `train()` function from the caret package is still computationally too heavy.
+```{r}
+fit <- randomForest(classe ~., data = training,na.action = na.roughfix)
+```
+
+## De-registering Parallel Processing Cluster
+Parallel processing is not necessary from here onwards, so it has to be stopped as follows:
+```{r}
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+## Check model suitability
+At this moment, just a quick check on model fit is done by looking at the confusion matrix:
+```{r}
+fit
+```
+The out-of-bag estimate of error rate is 0.52%, which is sufficiently low. 
+
+## Model Validation
+For model validation, the unused portion of the training data is used to calculate the model accuracy, as follows:
+```{r}
+pred1 <- predict(fit,testing)
+testing$rightPred <- pred1 == testing$classe
+tab1 <- table(pred1,testing$classe)
+tab1
+accuracy <- sum(testing$rightPred)/nrow(testing)
+accuracy
+```
+The accuracy obtained (0.9917) is very good. The model should be very suitable for good predictions.
+
+## Predicting New Data
+The new data in the provided test set were predicted as follows:
+```{r}
+predict(fit,dataP)
+```
